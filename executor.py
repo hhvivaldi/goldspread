@@ -75,6 +75,7 @@ class Executor:
         # In-memory state
         self._open_times: Dict[int, float] = {}  # ticket -> monotonic open time
         self._cooldown: Dict[str, float] = {}  # symbol -> earliest next try (monotonic)
+        self._edge_streak: Dict[str, int] = {}  # Bug 1: consecutive edge=1 ticks per pair
         self._daily_realized: float = 0.0
         self._daily_realized_date: Optional[str] = None
 
@@ -111,6 +112,9 @@ class Executor:
             today = ts_utc[:10]
             if today != self._daily_realized_date:
                 self._refresh_daily_date(today)
+
+            # Update consecutive-edge streak per pair (Bug 1 — duration filter)
+            self._update_edge_streak(row)
 
             # 1) Manage existing positions FIRST (close conditions)
             self._manage_open_positions(row, ts_utc)
@@ -205,6 +209,21 @@ class Executor:
         self._daily_realized_date = today
         self._daily_realized = 0.0
 
+    def _update_edge_streak(self, row: Dict[str, Any]) -> None:
+        """Bug 1 fix — track consecutive edge=1 ticks per derived pair.
+
+        Increments the per-pair counter when edge_exists==1; resets to 0
+        when the value is anything else (0 or None). Used by
+        _maybe_open_new to require >= 2 consecutive ticks (>= 400 ms)
+        before opening, filtering out single-tick (200 ms) flashes.
+        """
+        for pair in config.XAU_DERIVED:
+            edge = row.get(f"{pair.lower()}_edge_exists")
+            if edge == 1:
+                self._edge_streak[pair] = self._edge_streak.get(pair, 0) + 1
+            else:
+                self._edge_streak[pair] = 0
+
     # ------------------------------------------------------------------
     # Position management
     # ------------------------------------------------------------------
@@ -266,6 +285,12 @@ class Executor:
             if time.monotonic() < self._cooldown.get(pair, 0.0):
                 continue
 
+            # GUARD 5b (Bug 1): require >= 2 consecutive edge=1 ticks (>= 400 ms).
+            # Filters out single-tick (200 ms) flash edges that vanish before
+            # any execution can complete.
+            if self._edge_streak.get(pair, 0) < 2:
+                continue
+
             # GUARD 6: valid divergence sign
             div = row.get(f"{pair_lower}_divergence_usd_per_xau")
             if div is None or div == 0:
@@ -314,15 +339,34 @@ class Executor:
             self._cooldown[symbol] = time.monotonic() + 5.0
             return
 
-        sl_distance = self.sl_pips * 0.01  # XAU pip = 0.01 USD/oz of price
+        # Bug 2 fix — respect broker's minimum stops_level. The configured
+        # sl_pips * 0.01 (= 2.00 in price units) is fine for XAU pairs quoted
+        # in single-digit thousands (XAUUSD, XAUEUR, XAUGBP, XAUAUD, XAUCHF)
+        # but is far below broker minimum on XAUJPY where price ~740,000 JPY.
+        # Empirical: retcode=10016 (TRADE_RETCODE_INVALID_STOPS) on XAUJPY
+        # confirms broker enforces a floor in points x point.
+        point = float(getattr(sym_info, "point", 0) or 0.01)
+        stops_level_pts = int(getattr(sym_info, "trade_stops_level", 0) or 0)
+        digits = int(getattr(sym_info, "digits", 2) or 2)
+        broker_min_distance = stops_level_pts * point
+
+        sl_distance = self.sl_pips * 0.01  # configured XAU-pip distance
+        if broker_min_distance > sl_distance:
+            sl_distance = broker_min_distance * 1.10  # +10% safety buffer
+            log.info(
+                "open(%s): SL distance bumped to %.5f "
+                "(broker stops_level=%d pts x point=%.5f = %.5f, +10%% buffer)",
+                symbol, sl_distance, stops_level_pts, point,
+                broker_min_distance,
+            )
 
         if direction == "BUY":
             price = tick.ask
-            sl = price - sl_distance
+            sl = round(price - sl_distance, digits)
             order_type = mt5.ORDER_TYPE_BUY
         else:  # SELL
             price = tick.bid
-            sl = price + sl_distance
+            sl = round(price + sl_distance, digits)
             order_type = mt5.ORDER_TYPE_SELL
 
         request = {
