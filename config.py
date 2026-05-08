@@ -40,8 +40,8 @@ DAILY_CSV_EXPORT = os.environ.get(
 # ---------------------------------------------------------------------
 # 6 XAU pairs: 1 anchor (XAUUSD) + 5 derived pairs whose prices are
 # triangulable through the corresponding forex rate.
-XAU_PAIRS = ("XAUUSD", "XAUEUR", "XAUGBP", "XAUAUD", "XAUJPY", "XAUDCHF")
-XAU_DERIVED = ("XAUEUR", "XAUGBP", "XAUAUD", "XAUJPY", "XAUDCHF")
+XAU_PAIRS = ("XAUUSD", "XAUEUR", "XAUGBP", "XAUAUD", "XAUJPY", "XAUCHF")
+XAU_DERIVED = ("XAUEUR", "XAUGBP", "XAUAUD", "XAUJPY", "XAUCHF")
 
 # 5 forex pairs needed for the triangulation math.
 FOREX_PAIRS = ("EURUSD", "GBPUSD", "AUDUSD", "USDJPY", "USDCHF")
@@ -61,7 +61,7 @@ PIP_SIZE = {
     "XAUGBP": 0.01,
     "XAUAUD": 0.01,
     "XAUJPY": 0.01,
-    "XAUDCHF": 0.01,
+    "XAUCHF": 0.01,
     "EURUSD": 0.0001,
     "GBPUSD": 0.0001,
     "AUDUSD": 0.0001,
@@ -79,8 +79,8 @@ DERIVED_TRIANGLE = {
     "XAUEUR":  ("EURUSD", "div"),   # XAUEUR  = XAUUSD / EURUSD
     "XAUGBP":  ("GBPUSD", "div"),
     "XAUAUD":  ("AUDUSD", "div"),
-    "XAUJPY":  ("USDJPY", "mul"),   # XAUJPY  = XAUUSD * USDJPY
-    "XAUDCHF": ("USDCHF", "mul"),   # XAUDCHF = XAUUSD * USDCHF
+    "XAUJPY":  ("USDJPY", "mul"),   # XAUJPY = XAUUSD * USDJPY
+    "XAUCHF":  ("USDCHF", "mul"),   # XAUCHF = XAUUSD * USDCHF
 }
 
 

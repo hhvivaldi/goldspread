@@ -7,7 +7,7 @@ Phase 1 data logger: measures triangulation divergences across the broker's gold
 ## What it does
 
 Every 200 ms (configurable) it records, for one tick:
-- bid/ask of 6 XAU pairs: `XAUUSD`, `XAUEUR`, `XAUGBP`, `XAUAUD`, `XAUJPY`, `XAUDCHF`
+- bid/ask of 6 XAU pairs: `XAUUSD`, `XAUEUR`, `XAUGBP`, `XAUAUD`, `XAUJPY`, `XAUCHF`
 - bid/ask of 5 forex pairs: `EURUSD`, `GBPUSD`, `AUDUSD`, `USDJPY`, `USDCHF`
 - For each derived XAU pair: theoretical price (triangulated through the FX pair), divergence in **USD per XAU unit**, the XAU-pair spread in USD-per-XAU, the FX-pair hedge spread in USD-per-XAU, and a boolean `edge_exists` (= `|divergence| > combined spreads`).
 
@@ -23,7 +23,7 @@ Output:
 | XAUGBP | XAUUSD / GBPUSD | div |
 | XAUAUD | XAUUSD / AUDUSD | div |
 | XAUJPY | XAUUSD × USDJPY | mul |
-| XAUDCHF | XAUUSD × USDCHF | mul |
+| XAUCHF | XAUUSD × USDCHF | mul |
 
 All comparisons happen in USD-per-1-XAU-unit. The FX-pair "hedge spread" is the cost in USD of the implicit FX leg required to hold the synthetic position. Derivation is in `main.py:_compute_derived` with comments per branch.
 
