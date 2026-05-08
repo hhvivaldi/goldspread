@@ -22,40 +22,51 @@ log = logging.getLogger("goldspread.feed")
 
 
 def connect() -> None:
-    """Initialize MT5 and select every configured symbol.
+    """Attach to the running MT5 terminal in read-only mode.
 
-    Fatal if mt5.initialize() or login fails. If symbol_select fails for
-    any individual symbol, that symbol is logged once at WARN level and
-    will return None for every subsequent read — the run continues with
-    the rest of the symbols.
+    GoldSpread shares the MT5 terminal with FlokiWatch. We must NOT pass
+    login/password/server — doing so forces a re-login on the running
+    session and disconnects FlokiWatch (empirical: confirmed 2026-05-08).
+
+    The MetaTrader5 Python library, when initialize() is called with no
+    credentials, attaches to whatever terminal session is currently
+    logged in. The only optional argument is `path` — used solely to
+    disambiguate when multiple terminals are installed on the machine.
+
+    Read-only contract: this module calls only symbol_info_tick(),
+    symbol_select(), account_info() (informational), and shutdown().
+    No order placement, no plan submission, no state mutation on the
+    broker side.
+
+    Fatal if no terminal is available to attach to (account_info()
+    returns None — meaning Floki hasn't logged in yet, or terminal is
+    closed). If symbol_select fails for any individual symbol, that
+    symbol is logged once at WARN level and will return None for every
+    subsequent read — the run continues with the rest.
     """
     init_kwargs: Dict[str, object] = {}
+    # Path-only attach. login/password/server intentionally NOT passed —
+    # see docstring above.
     if config.MT5_TERMINAL_PATH:
         init_kwargs["path"] = config.MT5_TERMINAL_PATH
-    if config.MT5_ACCOUNT:
-        try:
-            init_kwargs["login"] = int(config.MT5_ACCOUNT)
-        except ValueError:
-            raise RuntimeError(
-                f"MT5_ACCOUNT must be an integer, got {config.MT5_ACCOUNT!r}"
-            )
-    if config.MT5_PASSWORD:
-        init_kwargs["password"] = config.MT5_PASSWORD
-    if config.MT5_SERVER:
-        init_kwargs["server"] = config.MT5_SERVER
 
     if not mt5.initialize(**init_kwargs):
         err = mt5.last_error()
-        raise RuntimeError(f"MT5 initialize failed: {err}")
+        raise RuntimeError(
+            f"MT5 attach failed: {err}. Is the terminal running and "
+            f"logged in (e.g. via FlokiWatch)?"
+        )
 
     info = mt5.account_info()
     if info is None:
         mt5.shutdown()
         raise RuntimeError(
-            "MT5 connected but account_info() returned None — login failed?"
+            "MT5 attached but account_info() returned None — terminal "
+            "appears not logged in. Start FlokiWatch (or log into the "
+            "terminal manually) before running GoldSpread."
         )
     log.info(
-        "MT5 connected | account=%s server=%s balance=%s leverage=%s",
+        "MT5 attached (read-only) | account=%s server=%s balance=%s leverage=%s",
         info.login, info.server, info.balance, info.leverage,
     )
 
