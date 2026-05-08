@@ -236,9 +236,11 @@ def main() -> int:
         ],
     )
 
-    log.info(
-        "GoldSpread starting | tick_interval_ms=%d db=%s executor_enabled=%s",
-        config.TICK_INTERVAL_MS, config.DB_PATH, config.EXECUTOR_ENABLED,
+    log.warning(
+        "===== GoldSpread STARTUP | BUILD=%s | tick_interval_ms=%d | "
+        "db=%s | executor_enabled=%s =====",
+        config.BUILD_TAG, config.TICK_INTERVAL_MS, config.DB_PATH,
+        config.EXECUTOR_ENABLED,
     )
 
     missing_env = config.validate_required()

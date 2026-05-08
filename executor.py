@@ -88,11 +88,12 @@ class Executor:
             self._refresh_daily_date(
                 datetime.now(timezone.utc).strftime("%Y-%m-%d"))
             log.warning(
-                "GoldSpread EXECUTOR ENABLED | magic=%d lot=%s "
+                "GoldSpread EXECUTOR ENABLED | BUILD=%s | magic=%d lot=%s "
                 "max_positions=%d sl_pips=%d hold_max_s=%d "
                 "daily_loss_cap=$%.2f deviation_pts=%d",
-                self.magic, self.lot, self.max_positions, self.sl_pips,
-                self.hold_max_seconds, self.daily_loss_cap, self.deviation,
+                config.BUILD_TAG, self.magic, self.lot, self.max_positions,
+                self.sl_pips, self.hold_max_seconds, self.daily_loss_cap,
+                self.deviation,
             )
         else:
             log.info(

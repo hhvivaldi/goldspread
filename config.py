@@ -16,6 +16,14 @@ load_dotenv(_PROJECT_ROOT / ".env")
 
 
 # ---------------------------------------------------------------------
+# BUILD_TAG — bumped on every code-affecting commit. Used as an
+# unambiguous "is the new code running?" marker in startup logs.
+# Grep "BUILD=" in logs/goldspread.log to verify.
+# ---------------------------------------------------------------------
+BUILD_TAG = "phase2.1-duration-filter-and-jpy-sl"
+
+
+# ---------------------------------------------------------------------
 # MT5 credentials
 # ---------------------------------------------------------------------
 MT5_ACCOUNT = os.environ.get("MT5_ACCOUNT", "").strip()
