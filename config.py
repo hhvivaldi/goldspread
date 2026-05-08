@@ -84,6 +84,28 @@ DERIVED_TRIANGLE = {
 }
 
 
+# ---------------------------------------------------------------------
+# Phase 2 — Executor settings (DEFAULT OFF)
+# ---------------------------------------------------------------------
+# Set GOLDSPREAD_EXECUTOR_ENABLED=true to ARM live demo execution.
+# Magic 77777 isolates GoldSpread positions from FlokiWatch (234000) —
+# the executor NEVER touches positions with any other magic number.
+EXECUTOR_ENABLED = os.environ.get(
+    "GOLDSPREAD_EXECUTOR_ENABLED", "false"
+).lower() in ("1", "true", "yes", "on")
+EXECUTOR_MAGIC = int(os.environ.get("GOLDSPREAD_EXECUTOR_MAGIC", "77777"))
+EXECUTOR_LOT = float(os.environ.get("GOLDSPREAD_EXECUTOR_LOT", "0.01"))
+EXECUTOR_MAX_POSITIONS = int(
+    os.environ.get("GOLDSPREAD_EXECUTOR_MAX_POSITIONS", "5"))
+EXECUTOR_HOLD_MAX_SECONDS = int(
+    os.environ.get("GOLDSPREAD_EXECUTOR_HOLD_MAX_SECONDS", "30"))
+EXECUTOR_SL_PIPS = int(os.environ.get("GOLDSPREAD_EXECUTOR_SL_PIPS", "200"))
+EXECUTOR_DAILY_LOSS_CAP_USD = float(
+    os.environ.get("GOLDSPREAD_EXECUTOR_DAILY_LOSS_CAP_USD", "10.0"))
+EXECUTOR_DEVIATION_POINTS = int(
+    os.environ.get("GOLDSPREAD_EXECUTOR_DEVIATION_POINTS", "20"))
+
+
 def validate_required() -> list[str]:
     """Return a list of missing required env-var names. Empty == OK."""
     missing: list[str] = []

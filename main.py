@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import config
 import feed
 from logger import TickLogger
+from executor import Executor
 
 
 log = logging.getLogger("goldspread.main")
@@ -236,8 +237,8 @@ def main() -> int:
     )
 
     log.info(
-        "GoldSpread Phase 1 starting | tick_interval_ms=%d db=%s",
-        config.TICK_INTERVAL_MS, config.DB_PATH,
+        "GoldSpread starting | tick_interval_ms=%d db=%s executor_enabled=%s",
+        config.TICK_INTERVAL_MS, config.DB_PATH, config.EXECUTOR_ENABLED,
     )
 
     missing_env = config.validate_required()
@@ -253,6 +254,7 @@ def main() -> int:
 
     tl = TickLogger()
     stats = _MinuteStats()
+    executor = Executor()  # no-op if EXECUTOR_ENABLED=false
 
     signal.signal(signal.SIGINT, _handle_signal)
     # SIGTERM is a no-op on Windows but registering is harmless.
@@ -277,6 +279,9 @@ def main() -> int:
             stats.record(ok, missing, edges)
             stats.maybe_log(ts_utc)
 
+            # Phase 2: synchronous executor hook. No-op if disabled.
+            executor.on_tick(row, ts_utc)
+
             # Daily CSV rollover (export the day that just ended).
             if last_csv_export_day is None:
                 last_csv_export_day = day_utc
@@ -289,6 +294,7 @@ def main() -> int:
             time.sleep(sleep_for)
     finally:
         log.info("Shutdown sequence")
+        executor.shutdown()  # closes magic=77777 positions + DB conn
         if last_csv_export_day:
             tl.export_daily_csv(last_csv_export_day)
         tl.close()
