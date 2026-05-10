@@ -20,7 +20,7 @@ load_dotenv(_PROJECT_ROOT / ".env")
 # unambiguous "is the new code running?" marker in startup logs.
 # Grep "BUILD=" in logs/goldspread.log to verify.
 # ---------------------------------------------------------------------
-BUILD_TAG = "phase2.1-duration-filter-and-jpy-sl"
+BUILD_TAG = "phase2.2-retcode-cooldown-and-sl-floor-v2"
 
 
 # ---------------------------------------------------------------------

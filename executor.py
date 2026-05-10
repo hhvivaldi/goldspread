@@ -311,6 +311,30 @@ class Executor:
         except Exception:
             return False
 
+    def _cooldown_for_retcode(self, rcode: Optional[int]) -> float:
+        """Map MT5 retcode to appropriate cooldown duration in seconds.
+
+        Bug 3 fix: retcode=10018 (TRADE_RETCODE_MARKET_CLOSED) means the
+        broker is closed for trading on this symbol. Retrying every tick
+        (200 ms) spams the broker for the full duration of market
+        closure. Cool down for 5 min so we only attempt 12 times/hour
+        instead of 18,000.
+        """
+        if rcode is None:
+            return 1.0
+        # 10018 = TRADE_RETCODE_MARKET_CLOSED
+        if rcode == 10018:
+            return 300.0
+        # 10017 = TRADE_RETCODE_TRADE_DISABLED (broker-side disable)
+        if rcode == 10017:
+            return 60.0
+        # 10016 = TRADE_RETCODE_INVALID_STOPS — longer cooldown so the
+        # next attempt picks up fresh stops_level data from the broker
+        if rcode == 10016:
+            return 5.0
+        # Default: short cooldown, transient issue
+        return 1.0
+
     # ------------------------------------------------------------------
     # Order placement
     # ------------------------------------------------------------------
@@ -340,25 +364,37 @@ class Executor:
             self._cooldown[symbol] = time.monotonic() + 5.0
             return
 
-        # Bug 2 fix — respect broker's minimum stops_level. The configured
-        # sl_pips * 0.01 (= 2.00 in price units) is fine for XAU pairs quoted
-        # in single-digit thousands (XAUUSD, XAUEUR, XAUGBP, XAUAUD, XAUCHF)
-        # but is far below broker minimum on XAUJPY where price ~740,000 JPY.
-        # Empirical: retcode=10016 (TRADE_RETCODE_INVALID_STOPS) on XAUJPY
-        # confirms broker enforces a floor in points x point.
+        # Bug 2/4 fix — respect broker's minimum SL distance. Some brokers
+        # use trade_stops_level, others use trade_freeze_level, and a few
+        # populate both. Take the max of both as the floor and apply a 25%
+        # safety buffer (was 10%; bumped after XAUAUD still failed with
+        # retcode=10016). Empirical:
+        #   - XAUJPY rejected with 10016 because stops_level*point (~2 JPY)
+        #     was below broker minimum at ~740,000 JPY price
+        #   - XAUAUD rejected even with the existing 10% buffer
         point = float(getattr(sym_info, "point", 0) or 0.01)
         stops_level_pts = int(getattr(sym_info, "trade_stops_level", 0) or 0)
+        freeze_level_pts = int(getattr(sym_info, "trade_freeze_level", 0) or 0)
+        broker_floor_pts = max(stops_level_pts, freeze_level_pts)
         digits = int(getattr(sym_info, "digits", 2) or 2)
-        broker_min_distance = stops_level_pts * point
+        broker_min_distance = broker_floor_pts * point
 
         sl_distance = self.sl_pips * 0.01  # configured XAU-pip distance
         if broker_min_distance > sl_distance:
-            sl_distance = broker_min_distance * 1.10  # +10% safety buffer
+            sl_distance = broker_min_distance * 1.25  # +25% safety buffer
             log.info(
                 "open(%s): SL distance bumped to %.5f "
-                "(broker stops_level=%d pts x point=%.5f = %.5f, +10%% buffer)",
-                symbol, sl_distance, stops_level_pts, point,
-                broker_min_distance,
+                "(stops_level=%d pts, freeze_level=%d pts, floor=%d pts "
+                "x point=%.5f = %.5f, +25%% buffer)",
+                symbol, sl_distance, stops_level_pts, freeze_level_pts,
+                broker_floor_pts, point, broker_min_distance,
+            )
+        else:
+            log.debug(
+                "open(%s): SL distance %.5f >= broker min %.5f "
+                "(stops_level=%d, freeze_level=%d) - no bump needed",
+                symbol, sl_distance, broker_min_distance,
+                stops_level_pts, freeze_level_pts,
             )
 
         if direction == "BUY":
@@ -395,11 +431,12 @@ class Executor:
         if result is None or result.retcode != mt5.TRADE_RETCODE_DONE:
             rcode = getattr(result, "retcode", None)
             err = mt5.last_error()
+            cooldown_s = self._cooldown_for_retcode(rcode)
             log.warning(
                 "open(%s, %s) FAILED retcode=%s last_error=%s "
-                "price=%.5f sl=%.5f", symbol, direction, rcode, err,
-                price, sl)
-            self._cooldown[symbol] = time.monotonic() + 1.0
+                "price=%.5f sl=%.5f cooldown=%.0fs",
+                symbol, direction, rcode, err, price, sl, cooldown_s)
+            self._cooldown[symbol] = time.monotonic() + cooldown_s
             return
 
         ticket = int(result.order)
