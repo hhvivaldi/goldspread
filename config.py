@@ -20,7 +20,7 @@ load_dotenv(_PROJECT_ROOT / ".env")
 # unambiguous "is the new code running?" marker in startup logs.
 # Grep "BUILD=" in logs/goldspread.log to verify.
 # ---------------------------------------------------------------------
-BUILD_TAG = "phase2.2-retcode-cooldown-and-sl-floor-v2"
+BUILD_TAG = "phase2.4-deal-profit-and-min-streak"
 
 
 # ---------------------------------------------------------------------
@@ -112,6 +112,11 @@ EXECUTOR_DAILY_LOSS_CAP_USD = float(
     os.environ.get("GOLDSPREAD_EXECUTOR_DAILY_LOSS_CAP_USD", "10.0"))
 EXECUTOR_DEVIATION_POINTS = int(
     os.environ.get("GOLDSPREAD_EXECUTOR_DEVIATION_POINTS", "20"))
+# Min consecutive edge=1 ticks before opening. At 200 ms/tick:
+#   2 = 400 ms (phase2.1 original)
+#   5 = 1.0 s (phase2.4 default — accommodates broker round-trip latency)
+EXECUTOR_MIN_STREAK = int(
+    os.environ.get("GOLDSPREAD_EXECUTOR_MIN_STREAK", "5"))
 
 
 def validate_required() -> list[str]:

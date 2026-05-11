@@ -71,6 +71,7 @@ class Executor:
         self.sl_pips: int = config.EXECUTOR_SL_PIPS
         self.daily_loss_cap: float = config.EXECUTOR_DAILY_LOSS_CAP_USD
         self.deviation: int = config.EXECUTOR_DEVIATION_POINTS
+        self.min_streak: int = config.EXECUTOR_MIN_STREAK
 
         # In-memory state
         self._open_times: Dict[int, float] = {}  # ticket -> monotonic open time
@@ -90,10 +91,10 @@ class Executor:
             log.warning(
                 "GoldSpread EXECUTOR ENABLED | BUILD=%s | magic=%d lot=%s "
                 "max_positions=%d sl_pips=%d hold_max_s=%d "
-                "daily_loss_cap=$%.2f deviation_pts=%d",
+                "daily_loss_cap=$%.2f deviation_pts=%d min_streak=%d",
                 config.BUILD_TAG, self.magic, self.lot, self.max_positions,
                 self.sl_pips, self.hold_max_seconds, self.daily_loss_cap,
-                self.deviation,
+                self.deviation, self.min_streak,
             )
         else:
             log.info(
@@ -286,10 +287,13 @@ class Executor:
             if time.monotonic() < self._cooldown.get(pair, 0.0):
                 continue
 
-            # GUARD 5b (Bug 1): require >= 2 consecutive edge=1 ticks (>= 400 ms).
-            # Filters out single-tick (200 ms) flash edges that vanish before
-            # any execution can complete.
-            if self._edge_streak.get(pair, 0) < 2:
+            # GUARD 5b (Bug 1, configurable phase2.4): require >= self.min_streak
+            # consecutive edge=1 ticks. At 200 ms tick interval:
+            #   2 ticks = 400 ms (phase2.1 original)
+            #   5 ticks = 1.0 s (phase2.4 default - covers typical broker
+            #                    round-trip 73-703 ms observed)
+            # Override via GOLDSPREAD_EXECUTOR_MIN_STREAK env var.
+            if self._edge_streak.get(pair, 0) < self.min_streak:
                 continue
 
             # GUARD 6: valid divergence sign
@@ -501,20 +505,46 @@ class Executor:
                 p.symbol, p.ticket, reason, rcode, err)
             return
 
-        # Realized = position's current profit + commission + swap
-        realized = (
+        # Fix 1 (Bug 5, phase2.4) — prefer the real DEAL profit over MTM
+        # snapshot. p.profit is the position's mark-to-market valued at the
+        # bid (for SELL) or ask (for BUY) when positions_get() was last
+        # called; the actual close fill price diverges from this when the
+        # bid-ask span is wide. Empirical: on 2026-05-11, ticket 1639024535
+        # showed DB=-0.31 but real deal profit=+1.39 (a $1.70 swing for one
+        # XAUGBP SELL with 24-pip spread). Query history_deals_get with the
+        # deal_id returned by order_send and use its realized profit; fall
+        # back to MTM if the lookup fails so we never lose a close audit.
+        realized_mtm = (
             float(p.profit)
             + float(getattr(p, "commission", 0.0) or 0.0)
             + float(getattr(p, "swap", 0.0) or 0.0)
         )
+        realized = realized_mtm
+        profit_source = "mtm_snapshot"
+        deal_id = getattr(result, "deal", None) or 0
+        try:
+            if deal_id:
+                deal_rows = mt5.history_deals_get(ticket=int(deal_id))
+                if deal_rows:
+                    od = deal_rows[0]
+                    realized = (
+                        float(od.profit)
+                        + float(getattr(od, "commission", 0.0) or 0.0)
+                        + float(getattr(od, "swap", 0.0) or 0.0)
+                    )
+                    profit_source = "history_deal"
+        except Exception as e:
+            log.debug("history_deals_get(ticket=%s) raised %s: %s",
+                      deal_id, type(e).__name__, e)
+
         self._daily_realized += realized
         self._open_times.pop(int(p.ticket), None)
         direction = "BUY" if p.type == mt5.POSITION_TYPE_BUY else "SELL"
         log.info(
             "CLOSE %s %s ticket=%d reason=%s price=%.5f profit=%+.2f "
-            "daily_realized=%+.2f",
+            "(src=%s mtm=%+.2f) daily_realized=%+.2f",
             p.symbol, direction, p.ticket, reason, float(result.price),
-            realized, self._daily_realized,
+            realized, profit_source, realized_mtm, self._daily_realized,
         )
         self._audit(
             ts_utc=ts_utc, event="CLOSE", symbol=p.symbol,
