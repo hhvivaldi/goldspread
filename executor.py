@@ -78,6 +78,11 @@ class Executor:
         self._open_times: Dict[int, float] = {}  # ticket -> monotonic open time
         self._cooldown: Dict[str, float] = {}  # symbol -> earliest next try (monotonic)
         self._edge_streak: Dict[str, int] = {}  # Bug 1: consecutive edge=1 ticks per pair
+        # phase2.6: after a timeout_30s close, block re-entry on this pair
+        # until edge_exists transitions to 0. Prevents tick-gap slicing
+        # where a stale edge causes repeat 30s re-entries on the same
+        # un-broken edge condition. Cleared in _update_edge_streak.
+        self._timestop_block: Dict[str, bool] = {}
         self._daily_realized: float = 0.0
         self._daily_realized_date: Optional[str] = None
 
@@ -228,6 +233,9 @@ class Executor:
                 self._edge_streak[pair] = self._edge_streak.get(pair, 0) + 1
             else:
                 self._edge_streak[pair] = 0
+                # phase2.6: edge has broken — clear any post-timeout block
+                # so a fresh streak rebuild can open a new position.
+                self._timestop_block[pair] = False
 
     # ------------------------------------------------------------------
     # Position management
@@ -255,6 +263,12 @@ class Executor:
 
             if close_reason is not None:
                 self._close_position(p, close_reason, ts_utc)
+                # phase2.6: arm post-timeout block. Re-entry on this pair
+                # is suppressed until edge_exists flips to 0 (which
+                # confirms the underlying condition truly ended, vs a
+                # tick-gap freezing the value at 1).
+                if close_reason == "timeout_30s":
+                    self._timestop_block[p.symbol] = True
 
     def _maybe_open_new(self, row: Dict[str, Any], ts_utc: str) -> None:
         # GUARD 1: daily loss cap
@@ -301,6 +315,16 @@ class Executor:
             #                    round-trip 73-703 ms observed)
             # Override via GOLDSPREAD_EXECUTOR_MIN_STREAK env var.
             if self._edge_streak.get(pair, 0) < self.min_streak:
+                continue
+
+            # GUARD 5c (phase2.6): post-timeout cooldown — block re-entry
+            # on this pair until edge_exists has transitioned to 0 since
+            # the last timeout_30s close. Prevents pathological re-entry
+            # slicing during tick-feed gaps, where a stale edge==1 lets
+            # streak rebuild in 2 ticks and triggers a new position
+            # against potentially hours-old prices. Cleared in
+            # _update_edge_streak on the first edge==0 tick.
+            if self._timestop_block.get(pair, False):
                 continue
 
             # GUARD 6: valid divergence sign

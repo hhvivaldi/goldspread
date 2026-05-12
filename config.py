@@ -20,7 +20,7 @@ load_dotenv(_PROJECT_ROOT / ".env")
 # unambiguous "is the new code running?" marker in startup logs.
 # Grep "BUILD=" in logs/goldspread.log to verify.
 # ---------------------------------------------------------------------
-BUILD_TAG = "phase2.5-streak2-symbol-exclude"
+BUILD_TAG = "phase2.6-post-timestop-cooldown"
 
 
 # ---------------------------------------------------------------------
