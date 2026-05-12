@@ -72,6 +72,7 @@ class Executor:
         self.daily_loss_cap: float = config.EXECUTOR_DAILY_LOSS_CAP_USD
         self.deviation: int = config.EXECUTOR_DEVIATION_POINTS
         self.min_streak: int = config.EXECUTOR_MIN_STREAK
+        self.symbol_exclude: frozenset[str] = config.EXECUTOR_SYMBOL_EXCLUDE
 
         # In-memory state
         self._open_times: Dict[int, float] = {}  # ticket -> monotonic open time
@@ -91,10 +92,12 @@ class Executor:
             log.warning(
                 "GoldSpread EXECUTOR ENABLED | BUILD=%s | magic=%d lot=%s "
                 "max_positions=%d sl_pips=%d hold_max_s=%d "
-                "daily_loss_cap=$%.2f deviation_pts=%d min_streak=%d",
+                "daily_loss_cap=$%.2f deviation_pts=%d min_streak=%d "
+                "symbol_exclude=%s",
                 config.BUILD_TAG, self.magic, self.lot, self.max_positions,
                 self.sl_pips, self.hold_max_seconds, self.daily_loss_cap,
                 self.deviation, self.min_streak,
+                ",".join(sorted(self.symbol_exclude)) or "(none)",
             )
         else:
             log.info(
@@ -277,6 +280,10 @@ class Executor:
             pair_lower = pair.lower()
             edge = row.get(f"{pair_lower}_edge_exists")
             if edge != 1:
+                continue
+
+            # GUARD 3b: symbol exclude list (phase2.5)
+            if pair in self.symbol_exclude:
                 continue
 
             # GUARD 4: no duplicate on same pair

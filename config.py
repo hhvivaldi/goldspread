@@ -20,7 +20,7 @@ load_dotenv(_PROJECT_ROOT / ".env")
 # unambiguous "is the new code running?" marker in startup logs.
 # Grep "BUILD=" in logs/goldspread.log to verify.
 # ---------------------------------------------------------------------
-BUILD_TAG = "phase2.4-deal-profit-and-min-streak"
+BUILD_TAG = "phase2.5-streak2-symbol-exclude"
 
 
 # ---------------------------------------------------------------------
@@ -117,6 +117,18 @@ EXECUTOR_DEVIATION_POINTS = int(
 #   5 = 1.0 s (phase2.4 default — accommodates broker round-trip latency)
 EXECUTOR_MIN_STREAK = int(
     os.environ.get("GOLDSPREAD_EXECUTOR_MIN_STREAK", "5"))
+# Comma-separated XAU pairs the executor must NEVER trade. Evaluated
+# at startup; case-insensitive; blanks ignored. Default excludes the
+# pairs whose broker spreads make divergence-based entries uneconomic
+# (XAUJPY ~2300-3300 pips, XAUAUD/XAUCHF illiquid on this broker).
+EXECUTOR_SYMBOL_EXCLUDE = frozenset(
+    s.strip().upper()
+    for s in os.environ.get(
+        "GOLDSPREAD_EXECUTOR_SYMBOL_EXCLUDE",
+        "XAUJPY,XAUAUD,XAUCHF",
+    ).split(",")
+    if s.strip()
+)
 
 
 def validate_required() -> list[str]:
