@@ -10,7 +10,9 @@ Stop with Ctrl-C. SIGINT/SIGTERM trigger a clean shutdown:
   - disconnect MT5
 """
 from __future__ import annotations
+import atexit
 import logging
+import os
 import signal
 import sys
 import time
@@ -25,6 +27,69 @@ from executor import Executor
 
 
 log = logging.getLogger("goldspread.main")
+
+
+# ---------------------------------------------------------------------
+# Single-instance lockfile (phase2.7) — prevents the bug from 2026-05-12
+# where multiple concurrent main.py processes attached to the same MT5
+# terminal under magic=77777 caused retcode=10027 (TOO_MANY_REQUESTS)
+# bursts and wasted edges. Lock contents = current PID. On startup, if
+# a lockfile exists and its PID is alive, abort. If PID is dead, the
+# lock is treated as stale and overwritten.
+# ---------------------------------------------------------------------
+LOCK_PATH = Path("data") / ".goldspread.lock"
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        if sys.platform == "win32":
+            import ctypes
+            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+            h = ctypes.windll.kernel32.OpenProcess(
+                PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+            if h:
+                ctypes.windll.kernel32.CloseHandle(h)
+                return True
+            return False
+        os.kill(pid, 0)
+        return True
+    except (OSError, ProcessLookupError, ValueError):
+        return False
+
+
+def _acquire_lock() -> bool:
+    """Return True on success, False if another live instance holds the
+    lock. Writes our PID to LOCK_PATH and registers atexit cleanup."""
+    LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
+    if LOCK_PATH.exists():
+        try:
+            existing = int(LOCK_PATH.read_text().strip())
+        except (ValueError, OSError):
+            existing = -1
+        if existing > 0 and existing != os.getpid() and _pid_alive(existing):
+            log.error(
+                "Another GoldSpread instance is already running (PID=%d). "
+                "Refusing to start a second instance — this caused the "
+                "2026-05-12 retcode=10027 burst. To override, delete %s "
+                "after confirming the other process is dead.",
+                existing, LOCK_PATH)
+            return False
+        log.warning(
+            "Stale lockfile found (PID=%d not alive). Overwriting.",
+            existing)
+    LOCK_PATH.write_text(str(os.getpid()))
+    atexit.register(_release_lock)
+    return True
+
+
+def _release_lock() -> None:
+    try:
+        if LOCK_PATH.exists():
+            pid_in_file = int(LOCK_PATH.read_text().strip() or "-1")
+            if pid_in_file == os.getpid():
+                LOCK_PATH.unlink()
+    except Exception as e:
+        log.warning("lock release failed: %s", e)
 
 
 # ---------------------------------------------------------------------
@@ -238,10 +303,13 @@ def main() -> int:
 
     log.warning(
         "===== GoldSpread STARTUP | BUILD=%s | tick_interval_ms=%d | "
-        "db=%s | executor_enabled=%s =====",
+        "db=%s | executor_enabled=%s | PID=%d =====",
         config.BUILD_TAG, config.TICK_INTERVAL_MS, config.DB_PATH,
-        config.EXECUTOR_ENABLED,
+        config.EXECUTOR_ENABLED, os.getpid(),
     )
+
+    if not _acquire_lock():
+        return 3
 
     missing_env = config.validate_required()
     if missing_env:

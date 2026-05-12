@@ -22,7 +22,9 @@ env/
 data/*.db
 data/*.db-shm
 data/*.db-wal
+data/*.db.bak.*
 data/*.csv
+data/.goldspread.lock
 logs/*.log
 
 # Keep folder structure in git
